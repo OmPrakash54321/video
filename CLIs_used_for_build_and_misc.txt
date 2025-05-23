@@ -1,0 +1,83 @@
+# Command i used to create x264 aarch64 exe
+./configure --host=aarch64-none-linux-gnu --cross-prefix=aarch64-none-linux-gnu- --extra-cflags="-march=armv8-a+simd" --sysroot=/home/mcw/Downloads/Video/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc --enable-static --extra-ldflags="-static"
+
+
+# How did i configure x265 10 bit ?
+ I used the aarch64-linux directory(not the arm linux coz it lead to some library mismatch during build)
+There was a crosscompile cmake file.
+Added something more in the toolchain file.
+just triggered the make with that cmake file as toolchain file
+strict static and to use neon simd. Disable assembly, coz it lead to core dumped issue while running in qcs
+And it asked for a libmvec.so file. To fix this, i disable shared.
+It compiled.
+ 
+
+# cli i used to crosscompile ffmpeg 
+./configure --arch=aarch64 --target-os=linux --cross-prefix=aarch64-none-linux-gnu- --sysroot=/home/mcw/Downloads/Video/tools_for_qcs/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc --enable-static --extra-cflags='-march=armv8-a+simd' --extra-ldflags=-static --enable-cross-compile --enable-gpl --disable-ffplay --disable-ffprobe --enable-linux-perf
+
+# FFmpeg compile cli with debug flag.
+./configure --arch=aarch64 --target-os=linux --cross-prefix=aarch64-none-linux-gnu- --sysroot=/home/mcw/Downloads/Video/tools_for_qcs/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc --enable-static --extra-cflags='-march=armv8-a+simd -g' --extra-ldflags=-static --enable-cross-compile --enable-gpl --disable-ffplay --disable-ffprobe --enable-linux-perf --disable-stripping --enable-debug=3
+
+
+# cli i tried to use for linking x265 with ffmpeg 
+./configure --arch=aarch64 --target-os=linux --cross-prefix=aarch64-none-linux-gnu- --sysroot=/home/mcw/Downloads/Video/tools_for_qcs/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc --enable-static --extra-cflags='-march=armv8-a+simd -I/home/mcw/Downloads/Video/tools_for_qcs/mcw_x265/x265/build/aarch64-linux' --extra-ldflags="-static -L/home/mcw/Downloads/Video/tools_for_qcs/mcw_x265/x265/build/aarch64-linux" --enable-libx265 --enable-cross-compile --enable-gpl --disable-ffplay --disable-ffprobe --enable-linux-perf
+
+
+# Issues while cross compiling uhdecode and how i fixed them
+asm files has .s  --> make them .S(capital) inside the c file where they are imported.
+at the linker stage, threw some linker issues due to FILE *out being initialised twice. This is due to a header file that has this initialistion. this file got imported to 2 files. Here i copied the FILE *out to main.c file instead of the header.
+i also installed 'yasm'
+I faced '-mfpu=neon' error. When i set 'CC=arm-none-...' it went away. This error occured coz gcc did not recognise neon. But arm-none-gcc recognises this.
+posix_memalign implicit declaration --> use perplexity --> it will show an import. use it.
+multiple definitions of out_file --> remove the import in uhdcli.h file and move it to uhdcli.c
+ Installed UHDcode. The issue was due to dynamic linking. and the variables i used in my cmake file didnt prevent dynamic linking.
+I used set(CMAKE_EXE_LINKER_FLAGS "-static") additionally in toolchain file. Then the file size got increased.
+*** cmake file can be found in scripts/crosscompile_files ***
+
+
+# How i cross-compiled stress-ng ?
+STATIC=1 CC=aarch64-none-linux-gnu-gcc CXX=aarch64-none-linux-gnu-g++ CFLAGS="-march=armv8-a -static" make -j 7
+
+
+
+# cli to build ffmpeg without neon
+# ffmpeg_defaultO_no_simd_no_asm
+./configure --arch=aarch64 --target-os=linux --cross-prefix=aarch64-none-linux-gnu- --sysroot=/home/mcw/Downloads/MCW/Video/tools_for_qcs/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc --enable-static --extra-cflags='-march=armv8-a -fno-tree-vectorize -g' --extra-ldflags=-static --enable-cross-compile --enable-gpl --disable-ffplay --disable-ffprobe --enable-linux-perf --disable-stripping --enable-debug=3 --disable-neon --disable-optimizations --disable-asm
+
+
+
+
+
+
+
+
+############################################# Clis used during the project ################################################################################
+
+
+
+
+
+
+# Script I used to downscale videos
+ffmpeg -r 60 -i downloaded/Netflix_Crosswalk_4096x2160_60fps_10bit_420.y4m -c:v rawvideo -vf scale=512:512 -pix_fmt yuv420p10le ./updated_videos/out_new.yuv
+
+
+# cli i use to run the video manipulator script
+.././video_gen.sh -f 4096x2160 -r 60 -s ./downloaded/Netflix_Crosswalk_4096x2160_60fps_10bit_420.y4m -d ./updated_videos/ -n "People_in_Crosswalk" -b 10
+
+
+# This ffmpeg hardware encoder cli does not throw 'segmentation fault' but not progressing
+ffmpeg -s 3840x2160 -pix_fmt yuv420p -i /mnt/ramdisk/pedestrian_area_3840x2160_30fps_yuv420p_8bit.yuv -pix_fmt nv12 -c:v hevc_v4l2m2m /mnt/ramdisk/output.265 -y
+
+
+# Receive files from remote server to local machine
+rsync -av -e ssh --exclude='*.264' --exclude='*.265'  root@192.168.22.93:/mnt/ramdisk/optimised_encoding ./8bit_4k_1ch_ramdisk_encode_perf_stat
+
+
+# TO get the bitrate from an encoded video
+ffmpeg -framerate 30 -i 2160.265 -c copy temp/2160.mp4
+ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1:nokey=1 temp/2160.mp4 | awk 'NR==1{d=$1} NR==2{print ($1*8)/d " bps"}'
+
+
+
+
